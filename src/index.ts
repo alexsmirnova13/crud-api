@@ -214,4 +214,6 @@ export default {
   startServer,
   close,
   getPort,
+  handler,
+  getAllUsers,
 };
