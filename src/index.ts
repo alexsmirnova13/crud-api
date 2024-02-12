@@ -2,7 +2,7 @@ import { Server, createServer } from 'http';
 import { validate as isUserIdValid, v4 } from 'uuid';
 import { IncomingMessage, ServerResponse } from 'http';
 import dotenv from 'dotenv';
-import { TUserInfoId, TUserInfo } from './interfacesTypes';
+import { TUserInfoId, TUserInfo, TCustomError } from './interfacesTypes';
 dotenv.config();
 
 const createHTTPError = (statusCode: number, message: string) => ({
@@ -34,7 +34,7 @@ const getAllUsers = async () => usersData;
 const getUserById = async (userId: string) => {
   const user = usersData.find((user) => user.id === userId);
   if (!user) {
-    throw createHTTPError(404, `user with id ${userId} doesn't exist`);
+    throw createHTTPError(404, `User with id ${userId} doesn't exist`);
   }
   return user;
 };
@@ -68,7 +68,7 @@ const validateUserCreation = (user: Partial<TUserInfo>) => {
   if (!isHobbiesValid) errors.push('hobbies');
 
   if (!isNameValid || !isAgeValid || !isHobbiesValid) {
-    throw createHTTPError(400, 'missing or incorrect - ' + errors.join(', '));
+    throw createHTTPError(400, 'Missing or incorrect - ' + errors.join(', '));
   }
 };
 
@@ -105,7 +105,7 @@ const getRequestData = async (request: IncomingMessage): Promise<object> => {
       } catch (error) {
         createHTTPError(
           400,
-          'body parsing error - ' + (error as Error).message,
+          'Body parsing error - ' + (error as Error).message,
         );
       }
     });
@@ -124,18 +124,16 @@ const handler = (port: number, silent?: boolean, multi?: boolean) => {
 
     response.setHeader('Content-Type', 'application/json');
     if (!silent)
-      console.log(
-        `Incoming request: ${method} ${url} on port ${port} (pid: ${process.pid})`,
-      );
+      console.log(`${method} ${url} on port ${port} (pid: ${process.pid})`);
 
     try {
       if (!isValidURL(url)) {
-        throw createHTTPError(404, 'no such endpoints');
+        throw createHTTPError(404, 'No such endpoints');
       }
       const groups = url.match(/\/api\/users\/([\w-]+)/);
       const userId = groups ? groups[1] : null;
       if (userId && !isUserIdValid(userId)) {
-        throw createHTTPError(400, 'invalid user id');
+        throw createHTTPError(400, 'Invalid user id');
       }
 
       let result = null;
@@ -154,7 +152,7 @@ const handler = (port: number, silent?: boolean, multi?: boolean) => {
             status = 204;
             break;
           default:
-            throw createHTTPError(400, 'no such method');
+            throw createHTTPError(400, 'No such method');
         }
       } else {
         switch (method) {
@@ -176,13 +174,19 @@ const handler = (port: number, silent?: boolean, multi?: boolean) => {
       if (multi) {
         typeof process.send === 'function' && process.send(await getAllUsers());
       }
-    } catch (error) {
+    } catch (error: unknown) {
+      console.log('ERROR', error);
       let status: number;
       let message: string;
 
-      if (typeof error === 'function') {
-        status = error().statusCode;
-        message = error().message;
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'statusCode' in error
+      ) {
+        const customError = error as TCustomError;
+        status = customError.statusCode;
+        message = customError.message;
       } else {
         status = 500;
         message = 'Internal server error: ' + (error as Error).message;
@@ -198,5 +202,16 @@ const handler = (port: number, silent?: boolean, multi?: boolean) => {
     }
   };
 };
-
+const close = () => {
+  httpServer.close();
+};
+const getPort = () => {
+  return serverConfig.PORT;
+};
 startServer();
+
+export default {
+  startServer,
+  close,
+  getPort,
+};
