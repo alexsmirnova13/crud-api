@@ -1,145 +1,202 @@
-import http from 'http';
-import * as dotenv from 'dotenv';
-import * as uuid from 'uuid';
-import { parse } from 'url';
-
+import { Server, createServer } from 'http';
+import { validate as isUserIdValid, v4 } from 'uuid';
+import { IncomingMessage, ServerResponse } from 'http';
+import dotenv from 'dotenv';
+import { TUserInfoId, TUserInfo } from './interfacesTypes';
 dotenv.config();
 
-interface User {
-  id: string;
-  name: string;
-  // Добавьте другие поля по необходимости
-}
+const createHTTPError = (statusCode: number, message: string) => ({
+  statusCode,
+  message,
+});
+let httpServer: Server;
 
-const users: User[] = [];
+const serverConfig = {
+  PORT: Number(process.env.PORT || 4000),
+};
 
-const server = http.createServer((req, res) => {
-  const { pathname, query } = parse(req.url || '', true);
+const startServer = (silent?: boolean) => {
+  httpServer = createServer(handler(serverConfig.PORT, silent));
 
-  if (pathname === '/api/users' && req.method === 'GET') {
-    // GET api/users
-    if (query && query.userId) {
-      // GET api/users/{userId}
-      const userId = String(query.userId);
+  httpServer.on('error', (error: Error) => {
+    console.log(`Stopped: ${(error as Error).message}`);
+  });
 
-      if (!uuid.validate(userId)) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid userId' }));
-        return;
-      }
+  httpServer.listen(serverConfig.PORT, () => {
+    if (!silent) console.log(`Listening on port ${serverConfig.PORT}`);
+  });
+};
 
-      const user = users.find((u) => u.id === userId);
+const usersData: TUserInfoId[] = [];
 
-      if (user) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(user));
-      } else {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'User not found' }));
-      }
-    } else {
-      // GET api/users
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(users));
-    }
-  } else if (pathname === '/api/users' && req.method === 'POST') {
-    // POST api/users
-    let body = '';
+const getAllUsers = async () => usersData;
 
-    req.on('data', (chunk) => {
-      body += chunk.toString();
-    });
-
-    req.on('end', () => {
-      try {
-        const userData = JSON.parse(body);
-
-        if (!userData.name) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Name is required' }));
-          return;
-        }
-
-        const newUser: User = { id: uuid.v4(), name: userData.name };
-        users.push(newUser);
-
-        res.writeHead(201, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(newUser));
-      } catch (error) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid request body' }));
-      }
-    });
-  } else if (pathname === '/api/users' && req.method === 'PUT') {
-    // PUT api/users/{userId}
-    const userId = pathname.split('/').pop();
-
-    if (!userId || !uuid.validate(userId)) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Invalid userId' }));
-      return;
-    }
-
-    const userIndex = users.findIndex((u) => u.id === userId);
-
-    if (userIndex !== -1) {
-      let body = '';
-
-      req.on('data', (chunk) => {
-        body += chunk.toString();
-      });
-
-      req.on('end', () => {
-        try {
-          const userData = JSON.parse(body);
-
-          if (!userData.name) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Name is required' }));
-            return;
-          }
-
-          users[userIndex] = { id: userId, name: userData.name };
-
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(users[userIndex]));
-        } catch (error) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid request body' }));
-        }
-      });
-    } else {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'User not found' }));
-    }
-  } else if (pathname === '/api/users' && req.method === 'DELETE') {
-    // DELETE api/users/{userId}
-    const userId = pathname.split('/').pop();
-
-    if (!userId || !uuid.validate(userId)) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Invalid userId' }));
-      return;
-    }
-
-    const userIndex = users.findIndex((u) => u.id === userId);
-
-    if (userIndex !== -1) {
-      users.splice(userIndex, 1);
-      res.writeHead(204);
-      res.end();
-    } else {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'User not found' }));
-    }
-  } else {
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Not Found' }));
+const getUserById = async (userId: string) => {
+  const user = usersData.find((user) => user.id === userId);
+  if (!user) {
+    throw createHTTPError(404, `user with id ${userId} doesn't exist`);
   }
-});
+  return user;
+};
 
-const port = process.env.PORT || 4000;
+const createNewUser = async (user: object) => {
+  validateUserCreation(user);
+  const userData = user as TUserInfo;
 
-server.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
-});
+  const newUser: TUserInfoId = {
+    id: v4(),
+    username: userData.username,
+    age: userData.age,
+    hobbies: userData.hobbies,
+  };
+
+  usersData.push(newUser);
+  return newUser;
+};
+
+const validateUserCreation = (user: Partial<TUserInfo>) => {
+  const errors = [];
+  const isNameValid = user.username && typeof user.username === 'string';
+  if (!isNameValid) errors.push('username');
+
+  const isAgeValid = user.age && typeof user.age === 'number' && user.age >= 0;
+  if (!isAgeValid) errors.push('age');
+
+  const isHobbiesValid =
+    Array.isArray(user.hobbies) &&
+    user.hobbies.every((hobby) => typeof hobby === 'string');
+  if (!isHobbiesValid) errors.push('hobbies');
+
+  if (!isNameValid || !isAgeValid || !isHobbiesValid) {
+    throw createHTTPError(400, 'missing or incorrect - ' + errors.join(', '));
+  }
+};
+
+const removeUser = async (userId: string) => {
+  await getUserById(userId);
+  const index = usersData.findIndex((user) => user.id === userId);
+  usersData.splice(index, 1);
+};
+
+const updateUser = async (userId: string, userData: object) => {
+  const userToUpdate = await getUserById(userId);
+  validateUserCreation(userData);
+  const bodyData = userData as TUserInfo;
+
+  userToUpdate.username = bodyData.username;
+  userToUpdate.age = bodyData.age;
+  userToUpdate.hobbies = bodyData.hobbies;
+
+  return userToUpdate;
+};
+
+const getRequestData = async (request: IncomingMessage): Promise<object> => {
+  let body = '';
+
+  request.on('data', (chunk) => {
+    body += chunk.toString();
+  });
+
+  return new Promise((resolve) => {
+    request.on('end', () => {
+      try {
+        const requestData = JSON.parse(body);
+        resolve(requestData);
+      } catch (error) {
+        createHTTPError(
+          400,
+          'body parsing error - ' + (error as Error).message,
+        );
+      }
+    });
+  });
+};
+const isValidURL = (url: string) => {
+  if (!url.match(/^\/api\/users\/?$/) && !url.match(/^\/api\/users\/[^\/]+$/))
+    return false;
+  return true;
+};
+
+const handler = (port: number, silent?: boolean, multi?: boolean) => {
+  return async (request: IncomingMessage, response: ServerResponse) => {
+    const method = request.method;
+    const url: string = request.url || '';
+
+    response.setHeader('Content-Type', 'application/json');
+    if (!silent)
+      console.log(
+        `Incoming request: ${method} ${url} on port ${port} (pid: ${process.pid})`,
+      );
+
+    try {
+      if (!isValidURL(url)) {
+        throw createHTTPError(404, 'no such endpoints');
+      }
+      const groups = url.match(/\/api\/users\/([\w-]+)/);
+      const userId = groups ? groups[1] : null;
+      if (userId && !isUserIdValid(userId)) {
+        throw createHTTPError(400, 'invalid user id');
+      }
+
+      let result = null;
+      let status = 200;
+
+      if (userId) {
+        switch (method) {
+          case 'GET':
+            result = await getUserById(userId);
+            break;
+          case 'PUT':
+            result = await updateUser(userId, await getRequestData(request));
+            break;
+          case 'DELETE':
+            result = await removeUser(userId);
+            status = 204;
+            break;
+          default:
+            throw createHTTPError(400, 'no such method');
+        }
+      } else {
+        switch (method) {
+          case 'GET':
+            result = await getAllUsers();
+            break;
+          case 'POST':
+            result = await createNewUser(await getRequestData(request));
+            status = 201;
+            break;
+          default:
+            throw createHTTPError(400, 'no such method');
+        }
+      }
+
+      response.statusCode = status;
+      response.end(JSON.stringify(result));
+
+      if (multi) {
+        typeof process.send === 'function' && process.send(await getAllUsers());
+      }
+    } catch (error) {
+      let status: number;
+      let message: string;
+
+      if (typeof error === 'function') {
+        status = error().statusCode;
+        message = error().message;
+      } else {
+        status = 500;
+        message = 'Internal server error: ' + (error as Error).message;
+      }
+
+      response.statusCode = status;
+      response.end(
+        JSON.stringify({
+          status,
+          message,
+        }),
+      );
+    }
+  };
+};
+
+startServer();
